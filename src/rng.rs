@@ -397,7 +397,6 @@ macro_rules! impl_fill {
     () => {};
     ($t:ty) => {
         impl Fill for [$t] {
-            #[inline(never)] // in micro benchmarks, this improves performance
             fn fill<R: Rng + ?Sized>(&mut self, rng: &mut R) {
                 if self.len() > 0 {
                     rng.fill_bytes(self.as_mut_bytes());
@@ -409,7 +408,6 @@ macro_rules! impl_fill {
         }
 
         impl Fill for [Wrapping<$t>] {
-            #[inline(never)]
             fn fill<R: Rng + ?Sized>(&mut self, rng: &mut R) {
                 if self.len() > 0 {
                     rng.fill_bytes(self.as_mut_bytes());
