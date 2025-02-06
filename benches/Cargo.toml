@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+simd_support = ["rand/simd_support"]
+
 [dependencies]
 
 [dev-dependencies]
@@ -36,6 +39,10 @@ harness = false
 
 [[bench]]
 name = "shuffle"
+harness = false
+
+[[bench]]
+name = "simd"
 harness = false
 
 [[bench]]
