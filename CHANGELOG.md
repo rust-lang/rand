@@ -8,6 +8,9 @@ A [separate changelog is kept for rand_core](rand_core/CHANGELOG.md).
 
 You may also find the [Upgrade Guide](https://rust-random.github.io/book/update.html) useful.
 
+## [Unreleased]
+- Remove `zerocopy` dependency (#1579)
+
 ## [0.9.0] - 2025-01-27
 ### Security and unsafe
 - Policy: "rand is not a crypto library" (#1514)
