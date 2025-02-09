@@ -107,21 +107,50 @@ impl_nzint!(NonZeroI64, NonZeroI64::new);
 impl_nzint!(NonZeroI128, NonZeroI128::new);
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-macro_rules! x86_intrinsic_impl {
-    ($meta:meta, $($intrinsic:ident),+) => {$(
-        #[cfg($meta)]
-        impl Distribution<$intrinsic> for StandardUniform {
-            #[inline]
-            fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> $intrinsic {
-                // On proper hardware, this should compile to SIMD instructions
-                // Verified on x86 Haswell with __m128i, __m256i
-                let mut buf = [0_u8; core::mem::size_of::<$intrinsic>()];
-                rng.fill_bytes(&mut buf);
-                // x86 is little endian so no need for conversion
-                zerocopy::transmute!(buf)
-            }
-        }
-    )+};
+impl Distribution<__m128i> for StandardUniform {
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> __m128i {
+        // NOTE: It's tempting to use the u128 impl here, but confusingly this
+        // results in different code (return via rdx, r10 instead of rax, rdx
+        // with u128 impl) and is much slower (+130 time). This version calls
+        // impls::fill_bytes_via_next but performs well.
+
+        let mut buf = [0_u8; core::mem::size_of::<__m128i>()];
+        rng.fill_bytes(&mut buf);
+        // x86 is little endian so no need for conversion
+
+        // SAFETY: both source and result types are valid for all values.
+        unsafe { core::mem::transmute(buf) }
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+impl Distribution<__m256i> for StandardUniform {
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> __m256i {
+        let mut buf = [0_u8; core::mem::size_of::<__m256i>()];
+        rng.fill_bytes(&mut buf);
+        // x86 is little endian so no need for conversion
+
+        // SAFETY: both source and result types are valid for all values.
+        unsafe { core::mem::transmute(buf) }
+    }
+}
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    feature = "simd_support"
+))]
+impl Distribution<__m512i> for StandardUniform {
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> __m512i {
+        let mut buf = [0_u8; core::mem::size_of::<__m512i>()];
+        rng.fill_bytes(&mut buf);
+        // x86 is little endian so no need for conversion
+
+        // SAFETY: both source and result types are valid for all values.
+        unsafe { core::mem::transmute(buf) }
+    }
 }
 
 #[cfg(feature = "simd_support")]
@@ -147,24 +176,6 @@ macro_rules! simd_impl {
 
 #[cfg(feature = "simd_support")]
 simd_impl!(u8, i8, u16, i16, u32, i32, u64, i64);
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-x86_intrinsic_impl!(
-    any(target_arch = "x86", target_arch = "x86_64"),
-    __m128i,
-    __m256i
-);
-#[cfg(all(
-    any(target_arch = "x86", target_arch = "x86_64"),
-    feature = "simd_support"
-))]
-x86_intrinsic_impl!(
-    all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        feature = "simd_support"
-    ),
-    __m512i
-);
 
 #[cfg(test)]
 mod tests {

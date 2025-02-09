@@ -43,7 +43,7 @@ alloc = []
 os_rng = ["rand_core/os_rng"]
 
 # Option (requires nightly Rust): experimental SIMD support
-simd_support = ["zerocopy/simd-nightly"]
+simd_support = []
 
 # Option (enabled by default): enable StdRng
 std_rng = ["dep:rand_chacha"]
@@ -75,7 +75,6 @@ rand_core = { path = "rand_core", version = "0.9.0", default-features = false }
 log = { version = "0.4.4", optional = true }
 serde = { version = "1.0.103", features = ["derive"], optional = true }
 rand_chacha = { path = "rand_chacha", version = "0.9.0", default-features = false, optional = true }
-zerocopy = { version = "0.8.0", default-features = false, features = ["simd"] }
 
 [dev-dependencies]
 rand_pcg = { path = "rand_pcg", version = "0.9.0" }

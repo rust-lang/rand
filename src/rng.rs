@@ -12,8 +12,8 @@
 use crate::distr::uniform::{SampleRange, SampleUniform};
 use crate::distr::{self, Distribution, StandardUniform};
 use core::num::Wrapping;
+use core::{mem, slice};
 use rand_core::RngCore;
-use zerocopy::IntoBytes;
 
 /// User-level interface for RNGs
 ///
@@ -393,14 +393,20 @@ impl Fill for [u8] {
     }
 }
 
-macro_rules! impl_fill {
+// This macro is unsafe to call: target types must support transmute from
+// random bits (i.e. all bit representations are valid).
+macro_rules! unsafe_impl_fill {
     () => {};
     ($t:ty) => {
         impl Fill for [$t] {
-            #[inline(never)] // in micro benchmarks, this improves performance
             fn fill<R: Rng + ?Sized>(&mut self, rng: &mut R) {
                 if self.len() > 0 {
-                    rng.fill_bytes(self.as_mut_bytes());
+                    rng.fill_bytes(unsafe {
+                        slice::from_raw_parts_mut(self.as_mut_ptr()
+                            as *mut u8,
+                            mem::size_of_val(self)
+                        )
+                    });
                     for x in self {
                         *x = x.to_le();
                     }
@@ -409,27 +415,31 @@ macro_rules! impl_fill {
         }
 
         impl Fill for [Wrapping<$t>] {
-            #[inline(never)]
             fn fill<R: Rng + ?Sized>(&mut self, rng: &mut R) {
                 if self.len() > 0 {
-                    rng.fill_bytes(self.as_mut_bytes());
+                    rng.fill_bytes(unsafe {
+                        slice::from_raw_parts_mut(self.as_mut_ptr()
+                            as *mut u8,
+                            self.len() * mem::size_of::<$t>()
+                        )
+                    });
                     for x in self {
-                    *x = Wrapping(x.0.to_le());
+                        *x = Wrapping(x.0.to_le());
                     }
                 }
             }
         }
     };
     ($t:ty, $($tt:ty,)*) => {
-        impl_fill!($t);
+        unsafe_impl_fill!($t);
         // TODO: this could replace above impl once Rust #32463 is fixed
-        // impl_fill!(Wrapping<$t>);
-        impl_fill!($($tt,)*);
+        // unsafe_impl_fill!(Wrapping<$t>);
+        unsafe_impl_fill!($($tt,)*);
     }
 }
 
-impl_fill!(u16, u32, u64, u128,);
-impl_fill!(i8, i16, i32, i64, i128,);
+unsafe_impl_fill!(u16, u32, u64, u128,);
+unsafe_impl_fill!(i8, i16, i32, i64, i128,);
 
 impl<T, const N: usize> Fill for [T; N]
 where
