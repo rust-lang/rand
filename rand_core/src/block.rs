@@ -53,7 +53,7 @@
 //! [`BlockRngCore`]: crate::block::BlockRngCore
 //! [`fill_bytes`]: RngCore::fill_bytes
 
-use crate::impls::{fill_via_u32_chunks, fill_via_u64_chunks};
+use crate::impls::fill_via_chunks;
 use crate::{CryptoRng, RngCore, SeedableRng, TryRngCore};
 use core::fmt;
 #[cfg(feature = "serde")]
@@ -225,10 +225,8 @@ impl<R: BlockRngCore<Item = u32>> RngCore for BlockRng<R> {
             if self.index >= self.results.as_ref().len() {
                 self.generate_and_set(0);
             }
-            let (consumed_u32, filled_u8) = fill_via_u32_chunks(
-                &mut self.results.as_mut()[self.index..],
-                &mut dest[read_len..],
-            );
+            let (consumed_u32, filled_u8) =
+                fill_via_chunks(&self.results.as_mut()[self.index..], &mut dest[read_len..]);
 
             self.index += consumed_u32;
             read_len += filled_u8;
@@ -390,10 +388,8 @@ impl<R: BlockRngCore<Item = u64>> RngCore for BlockRng64<R> {
                 self.index = 0;
             }
 
-            let (consumed_u64, filled_u8) = fill_via_u64_chunks(
-                &mut self.results.as_mut()[self.index..],
-                &mut dest[read_len..],
-            );
+            let (consumed_u64, filled_u8) =
+                fill_via_chunks(&self.results.as_mut()[self.index..], &mut dest[read_len..]);
 
             self.index += consumed_u64;
             read_len += filled_u8;

@@ -18,8 +18,6 @@
 //! non-reproducible sources (e.g. `OsRng`) need not bother with it.
 
 use crate::RngCore;
-use core::cmp::min;
-use zerocopy::{Immutable, IntoBytes};
 
 /// Implement `next_u64` via `next_u32`, little-endian order.
 pub fn next_u64_via_u32<R: RngCore + ?Sized>(rng: &mut R) -> u64 {
@@ -53,41 +51,52 @@ pub fn fill_bytes_via_next<R: RngCore + ?Sized>(rng: &mut R, dest: &mut [u8]) {
     }
 }
 
-trait Observable: IntoBytes + Immutable + Copy {
-    fn to_le(self) -> Self;
+pub(crate) trait Observable: Copy {
+    type Bytes: Sized + AsRef<[u8]>;
+    fn to_le_bytes(self) -> Self::Bytes;
 }
 impl Observable for u32 {
-    fn to_le(self) -> Self {
-        self.to_le()
+    type Bytes = [u8; 4];
+
+    fn to_le_bytes(self) -> Self::Bytes {
+        Self::to_le_bytes(self)
     }
 }
 impl Observable for u64 {
-    fn to_le(self) -> Self {
-        self.to_le()
+    type Bytes = [u8; 8];
+
+    fn to_le_bytes(self) -> Self::Bytes {
+        Self::to_le_bytes(self)
     }
 }
 
 /// Fill dest from src
 ///
-/// Returns `(n, byte_len)`. `src[..n]` is consumed (and possibly mutated),
+/// Returns `(n, byte_len)`. `src[..n]` is consumed,
 /// `dest[..byte_len]` is filled. `src[n..]` and `dest[byte_len..]` are left
 /// unaltered.
-fn fill_via_chunks<T: Observable>(src: &mut [T], dest: &mut [u8]) -> (usize, usize) {
+pub(crate) fn fill_via_chunks<T: Observable>(src: &[T], dest: &mut [u8]) -> (usize, usize) {
     let size = core::mem::size_of::<T>();
-    let byte_len = min(core::mem::size_of_val(src), dest.len());
-    let num_chunks = (byte_len + size - 1) / size;
 
-    // Byte-swap for portability of results. This must happen before copying
-    // since the size of dest is not guaranteed to be a multiple of T or to be
-    // sufficiently aligned.
-    if cfg!(target_endian = "big") {
-        for x in &mut src[..num_chunks] {
-            *x = x.to_le();
+    // Always use little endian for portability of results.
+
+    let mut dest = dest.chunks_exact_mut(size);
+    let mut src = src.iter();
+
+    let zipped = dest.by_ref().zip(src.by_ref());
+    let num_chunks = zipped.len();
+    zipped.for_each(|(dest, src)| dest.copy_from_slice(src.to_le_bytes().as_ref()));
+
+    let byte_len = num_chunks * size;
+    if let Some(src) = src.next() {
+        // We have consumed all full chunks of dest, but not src.
+        let dest = dest.into_remainder();
+        let n = dest.len();
+        if n > 0 {
+            dest.copy_from_slice(&src.to_le_bytes().as_ref()[..n]);
+            return (num_chunks + 1, byte_len + n);
         }
     }
-
-    dest[..byte_len].copy_from_slice(&<[T]>::as_bytes(&src[..num_chunks])[..byte_len]);
-
     (num_chunks, byte_len)
 }
 
@@ -96,8 +105,8 @@ fn fill_via_chunks<T: Observable>(src: &mut [T], dest: &mut [u8]) -> (usize, usi
 ///
 /// The return values are `(consumed_u32, filled_u8)`.
 ///
-/// On big-endian systems, endianness of `src[..consumed_u32]` values is
-/// swapped. No other adjustments to `src` are made.
+/// `src` is not modified; it is taken as a `&mut` reference for backward
+/// compatibility with previous versions that did change it.
 ///
 /// `filled_u8` is the number of filled bytes in `dest`, which may be less than
 /// the length of `dest`.
@@ -124,6 +133,7 @@ fn fill_via_chunks<T: Observable>(src: &mut [T], dest: &mut [u8]) -> (usize, usi
 ///     }
 /// }
 /// ```
+#[deprecated(since = "0.9.3", note = "use BlockRng instead")]
 pub fn fill_via_u32_chunks(src: &mut [u32], dest: &mut [u8]) -> (usize, usize) {
     fill_via_chunks(src, dest)
 }
@@ -133,8 +143,8 @@ pub fn fill_via_u32_chunks(src: &mut [u32], dest: &mut [u8]) -> (usize, usize) {
 ///
 /// The return values are `(consumed_u64, filled_u8)`.
 ///
-/// On big-endian systems, endianness of `src[..consumed_u64]` values is
-/// swapped. No other adjustments to `src` are made.
+/// `src` is not modified; it is taken as a `&mut` reference for backward
+/// compatibility with previous versions that did change it.
 ///
 /// `filled_u8` is the number of filled bytes in `dest`, which may be less than
 /// the length of `dest`.
@@ -142,6 +152,7 @@ pub fn fill_via_u32_chunks(src: &mut [u32], dest: &mut [u8]) -> (usize, usize) {
 /// as `filled_u8 / 8` rounded up.
 ///
 /// See `fill_via_u32_chunks` for an example.
+#[deprecated(since = "0.9.3", note = "use BlockRng64 instead")]
 pub fn fill_via_u64_chunks(src: &mut [u64], dest: &mut [u8]) -> (usize, usize) {
     fill_via_chunks(src, dest)
 }
@@ -166,41 +177,41 @@ mod test {
 
     #[test]
     fn test_fill_via_u32_chunks() {
-        let src_orig = [1, 2, 3];
+        let src_orig = [1u32, 2, 3];
 
         let mut src = src_orig;
         let mut dst = [0u8; 11];
-        assert_eq!(fill_via_u32_chunks(&mut src, &mut dst), (3, 11));
+        assert_eq!(fill_via_chunks(&mut src, &mut dst), (3, 11));
         assert_eq!(dst, [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0]);
 
         let mut src = src_orig;
         let mut dst = [0u8; 13];
-        assert_eq!(fill_via_u32_chunks(&mut src, &mut dst), (3, 12));
+        assert_eq!(fill_via_chunks(&mut src, &mut dst), (3, 12));
         assert_eq!(dst, [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0]);
 
         let mut src = src_orig;
         let mut dst = [0u8; 5];
-        assert_eq!(fill_via_u32_chunks(&mut src, &mut dst), (2, 5));
+        assert_eq!(fill_via_chunks(&mut src, &mut dst), (2, 5));
         assert_eq!(dst, [1, 0, 0, 0, 2]);
     }
 
     #[test]
     fn test_fill_via_u64_chunks() {
-        let src_orig = [1, 2];
+        let src_orig = [1u64, 2];
 
         let mut src = src_orig;
         let mut dst = [0u8; 11];
-        assert_eq!(fill_via_u64_chunks(&mut src, &mut dst), (2, 11));
+        assert_eq!(fill_via_chunks(&mut src, &mut dst), (2, 11));
         assert_eq!(dst, [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0]);
 
         let mut src = src_orig;
         let mut dst = [0u8; 17];
-        assert_eq!(fill_via_u64_chunks(&mut src, &mut dst), (2, 16));
+        assert_eq!(fill_via_chunks(&mut src, &mut dst), (2, 16));
         assert_eq!(dst, [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let mut src = src_orig;
         let mut dst = [0u8; 5];
-        assert_eq!(fill_via_u64_chunks(&mut src, &mut dst), (1, 5));
+        assert_eq!(fill_via_chunks(&mut src, &mut dst), (1, 5));
         assert_eq!(dst, [1, 0, 0, 0, 0]);
     }
 }
